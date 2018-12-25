@@ -34,7 +34,7 @@ use RZ\MixedFeed\AbstractFeedProvider\AbstractTwitterFeed;
  */
 class TwitterFeed extends AbstractTwitterFeed
 {
-    protected $userId;
+    protected $screenName;
     protected $accessToken;
     protected $cacheProvider;
     protected $cacheKey;
@@ -50,7 +50,7 @@ class TwitterFeed extends AbstractTwitterFeed
 
     /**
      *
-     * @param string $userId
+     * @param string $screenName
      * @param string $consumerKey
      * @param string $consumerSecret
      * @param string $accessToken
@@ -62,7 +62,7 @@ class TwitterFeed extends AbstractTwitterFeed
      * @throws Exception\CredentialsException
      */
     public function __construct(
-        $userId,
+        $screenName,
         $consumerKey,
         $consumerSecret,
         $accessToken,
@@ -81,11 +81,11 @@ class TwitterFeed extends AbstractTwitterFeed
             $cacheProvider
         );
 
-        $this->userId = $userId;
+        $this->screenName = $screenName;
         $this->excludeReplies = $excludeReplies;
         $this->includeRts = $includeRts;
         $this->extended = $extended;
-        $this->cacheKey = $this->getFeedPlatform() . $this->userId;
+        $this->cacheKey = $this->getFeedPlatform() . $this->screenName;
     }
 
     protected function getFeed($count = 5)
@@ -98,7 +98,7 @@ class TwitterFeed extends AbstractTwitterFeed
                 return $this->cacheProvider->fetch($countKey);
             }
             $body = $this->twitterConnection->get("statuses/user_timeline", [
-                "user_id" => $this->userId,
+                "screen_name" => $this->screenName,
                 "count" => $count,
                 "exclude_replies" => $this->excludeReplies,
                 'include_rts' => $this->includeRts,
