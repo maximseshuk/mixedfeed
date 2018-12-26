@@ -87,11 +87,16 @@ class YoutubeFeed extends AbstractFeedProvider
      */
     public function getCanonicalMessage($item)
     {
-        if (null !== $item->snippet) {
-            return $item->snippet->description;
+        if (isset($item->snippet)) {
+            if(!empty($item->snippet->description)) {
+	            return $item->snippet->description;
+            }
+            else {
+	            return $item->snippet->title;
+            }
         }
 
-        return "";
+        return '';
     }
 
     /**
