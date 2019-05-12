@@ -2,7 +2,9 @@
 namespace RZ\MixedFeed;
 
 use Doctrine\Common\Cache\CacheProvider;
+use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
+use RZ\MixedFeed\Canonical\Image;
 use RZ\MixedFeed\Exception\CredentialsException;
 
 /**
@@ -40,14 +42,14 @@ class YoutubeFeed extends AbstractFeedProvider
                 return $this->cacheProvider->fetch($countKey);
             }
 
-            $client = new \GuzzleHttp\Client();
+            $client = new Client();
             $response = $client->get('https://www.googleapis.com/youtube/v3/search', [
                 'query' => [
-	                'order' => 'date',
-	                'part' => 'snippet',
-	                'channelId' => $this->channelId,
+                    'order' => 'date',
+                    'part' => 'snippet',
+                    'channelId' => $this->channelId,
                     'maxResults' => $count,
-	                'key' => $this->accessToken,
+                    'key' => $this->accessToken,
                 ],
             ]);
             $body = json_decode($response->getBody());
@@ -73,11 +75,11 @@ class YoutubeFeed extends AbstractFeedProvider
      */
     public function getDateTime($item)
     {
-	    $date = new \DateTime();
+        $date = new \DateTime();
 
-	    if (null !== $item->snippet) {
-		    $date->setTimestamp(strtotime($item->snippet->publishedAt));
-	    }
+        if (null !== $item->snippet) {
+            $date->setTimestamp(strtotime($item->snippet->publishedAt));
+        }
 
         return $date;
     }
@@ -89,10 +91,10 @@ class YoutubeFeed extends AbstractFeedProvider
     {
         if (isset($item->snippet)) {
             if(!empty($item->snippet->description)) {
-	            return $item->snippet->description;
+                return $item->snippet->description;
             }
             else {
-	            return $item->snippet->title;
+                return $item->snippet->title;
             }
         }
 
@@ -121,5 +123,29 @@ class YoutubeFeed extends AbstractFeedProvider
     public function getErrors($feed)
     {
         return $feed['error'];
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected function createFeedItemFromObject($item)
+    {
+        $feedItem = parent::createFeedItemFromObject($item);
+        $feedItem->setId( $item->id->videoId);
+        if (isset( $item->snippet)) {
+            $feedItem->setAuthor($item->snippet->channelTitle);
+        }
+
+        $feedItem->setLink('https://www.youtube.com/watch?v=' . $item->id->videoId);
+
+        if (isset( $item->snippet->thumbnails)) {
+            $feedItemImage = new Image();
+            $feedItemImage->setUrl($item->snippet->thumbnails->high->url);
+            $feedItemImage->setWidth($item->snippet->thumbnails->high->width);
+            $feedItemImage->setHeight($item->snippet->thumbnails->high->height);
+            $feedItem->addImage($feedItemImage);
+        }
+
+        return $feedItem;
     }
 }
