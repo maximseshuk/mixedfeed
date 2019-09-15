@@ -2,10 +2,11 @@
 namespace RZ\MixedFeed;
 
 use Doctrine\Common\Cache\CacheProvider;
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\ClientException;
+use GuzzleHttp\Psr7\Request;
+use RZ\MixedFeed\Canonical\FeedItem;
 use RZ\MixedFeed\Canonical\Image;
 use RZ\MixedFeed\Exception\CredentialsException;
+use RZ\MixedFeed\Exception\FeedProviderErrorException;
 
 /**
  * Get an Youtube channel feed.
@@ -14,16 +15,20 @@ class YoutubeFeed extends AbstractFeedProvider
 {
     protected $channelId;
     protected $accessToken;
-    protected $cacheProvider;
-    protected $cacheKey;
     protected static $timeKey = 'publishedAt';
 
+	/**
+	 *
+	 * @param string $channelId
+	 * @param string $accessToken Your App Token
+	 * @param CacheProvider|null $cacheProvider
+	 * @throws CredentialsException
+	 */
     public function __construct($channelId, $accessToken, CacheProvider $cacheProvider = null)
     {
+	    parent::__construct($cacheProvider);
         $this->channelId = $channelId;
         $this->accessToken = $accessToken;
-        $this->cacheProvider = $cacheProvider;
-        $this->cacheKey = $this->getFeedPlatform() . $this->channelId;
 
         if (null === $this->accessToken ||
             false === $this->accessToken ||
@@ -32,43 +37,52 @@ class YoutubeFeed extends AbstractFeedProvider
         }
     }
 
-    protected function getFeed($count = 5)
-    {
-        try {
-            $countKey = $this->cacheKey . $count;
+	protected function getCacheKey(): string
+	{
+		return $this->getFeedPlatform() . $this->channelId;
+	}
 
-            if (null !== $this->cacheProvider &&
-                $this->cacheProvider->contains($countKey)) {
-                return $this->cacheProvider->fetch($countKey);
-            }
+	/**
+	 * @inheritDoc
+	 */
+	public function getRequests($count = 5): \Generator
+	{
+		$value = http_build_query([
+			'order' => 'date',
+			'part' => 'snippet',
+			'channelId' => $this->channelId,
+			'maxResults' => $count,
+			'key' => $this->accessToken,
+		], null, '&', PHP_QUERY_RFC3986);
+		yield new Request(
+			'GET',
+			'https://www.googleapis.com/youtube/v3/search?'.$value
+		);
+	}
 
-            $client = new Client();
-            $response = $client->get('https://www.googleapis.com/youtube/v3/search', [
-                'query' => [
-                    'order' => 'date',
-                    'part' => 'snippet',
-                    'channelId' => $this->channelId,
-                    'maxResults' => $count,
-                    'key' => $this->accessToken,
-                ],
-            ]);
-            $body = json_decode($response->getBody());
+	/**
+	 * {@inheritdoc}
+	 */
+	public function isValid($feed)
+	{
+		if (count($this->errors) > 0) {
+			throw new FeedProviderErrorException($this->getFeedPlatform(), implode(', ', $this->errors));
+		}
+		return isset($feed->items) && is_iterable($feed->items);
+	}
 
-            if (null !== $this->cacheProvider) {
-                $this->cacheProvider->save(
-                    $countKey,
-                    $body->items,
-                    $this->ttl
-                );
-            }
-
-            return $body->items;
-        } catch (ClientException $e) {
-            return [
-                'error' => $e->getMessage(),
-            ];
-        }
-    }
+	/**
+	 * @param int $count
+	 * @return mixed
+	 */
+	protected function getFeed($count = 5)
+	{
+		$rawFeed = $this->getRawFeed($count);
+		if ($this->isValid($rawFeed)) {
+			return $rawFeed->items;
+		}
+		return [];
+	}
 
     /**
      * {@inheritdoc}
@@ -112,30 +126,13 @@ class YoutubeFeed extends AbstractFeedProvider
     /**
      * {@inheritdoc}
      */
-    public function isValid($feed)
-    {
-        return null !== $feed && is_array($feed) && !isset($feed['error']);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getErrors($feed)
-    {
-        return $feed['error'];
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    protected function createFeedItemFromObject($item)
+	protected function createFeedItemFromObject($item): FeedItem
     {
         $feedItem = parent::createFeedItemFromObject($item);
         $feedItem->setId( $item->id->videoId);
         if (isset( $item->snippet)) {
             $feedItem->setAuthor($item->snippet->channelTitle);
         }
-
         $feedItem->setLink('https://www.youtube.com/watch?v=' . $item->id->videoId);
 
         if (isset( $item->snippet->thumbnails)) {
