@@ -3,11 +3,19 @@
 namespace RZ\MixedFeed;
 
 use Doctrine\Common\Cache\CacheProvider;
+use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
+use GuzzleHttp\Psr7\Request;
+use RZ\MixedFeed\Canonical\FeedItem;
 use RZ\MixedFeed\Canonical\Image;
+use RZ\MixedFeed\Exception\FeedProviderErrorException;
 
 class MediumFeed extends AbstractFeedProvider
 {
+    /**
+     * @var null
+     */
+    protected $userId;
     /**
      * @var string
      */
@@ -15,53 +23,109 @@ class MediumFeed extends AbstractFeedProvider
     /**
      * @var string
      */
-    private $cacheKey;
-    /**
-     * @var CacheProvider
-     */
-    private $cacheProvider;
+    private $name;
     /**
      * @var string
      */
-    private $name;
+    private $url;
+    /**
+     * @var bool
+     */
+    private $useLatestPublicationDate = false;
 
     /**
      * MediumFeed constructor.
      *
      * @param string        $username
      * @param CacheProvider $cacheProvider
+     * @param null          $userId
      */
-    public function __construct($username, CacheProvider $cacheProvider = null)
+    public function __construct($username, CacheProvider $cacheProvider = null, $userId = null)
     {
+        parent::__construct($cacheProvider);
         $this->username = $username;
-        if (substr($username, 0, 1) !== '@') {
-            $this->username = '@'.$username;
-        }
         $this->cacheProvider = $cacheProvider;
+        $this->userId = $userId;
+
+        if ($this->userId !== null) {
+            /*
+             * If userId is available, use the profile/stream endpoint instead for better consistency
+             * between calls.
+             */
+            $this->url = 'https://medium.com/_/api/users/' . $this->userId . '/profile/stream';
+        } else {
+            $this->url = 'https://medium.com/' . $this->username . '/latest';
+        }
+    }
+
+    protected function getCacheKey(): string
+    {
+        return $this->getFeedPlatform() . $this->username;
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function getRequests($count = 5): \Generator
+    {
+        $value = http_build_query([
+            'format' => 'json',
+            'limit' => $count,
+            'collectionId' => null,
+            'source' => 'latest',
+        ], null, '&', PHP_QUERY_RFC3986);
+        yield new Request(
+            'GET',
+            $this->url . '?' . $value
+        );
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function setRawFeed($rawFeed, $json = true): AbstractFeedProvider
+    {
+        if ($json === true) {
+            $rawFeed = str_replace('])}while(1);</x>', '', $rawFeed);
+            $rawFeed = json_decode($rawFeed);
+            if ('No error' !== $jsonError = json_last_error_msg()) {
+                throw new \RuntimeException($jsonError);
+            }
+        }
+        $this->rawFeed = $rawFeed;
+        return $this;
     }
 
 
-    protected function getFeed($count = 5)
+    protected function getRawFeed($count = 5)
     {
+        $countKey = $this->getCacheKey() . $count;
+
+        if (null !== $this->rawFeed) {
+            if (null !== $this->cacheProvider &&
+                !$this->cacheProvider->contains($countKey)) {
+                $this->cacheProvider->save(
+                    $countKey,
+                    $this->rawFeed,
+                    $this->ttl
+                );
+            }
+            return $this->rawFeed;
+        }
         try {
-            $countKey = $this->cacheKey . $count;
             if (null !== $this->cacheProvider &&
                 $this->cacheProvider->contains($countKey)) {
-                return $this->getTypedFeed($this->cacheProvider->fetch($countKey));
+                return $this->cacheProvider->fetch($countKey);
             }
 
-            $client = new \GuzzleHttp\Client();
-            $response = $client->get('https://medium.com/' . $this->username . '/latest', [
-                'query' => [
-                    'format' => 'json',
-                    'limit' => $count,
-                    'collectionId' => null,
-                    'source' => 'latest',
-                ],
-            ]);
-            $raw = $response->getBody();
+            $client = new Client();
+            $response = $client->send($this->getRequests($count)->current());
+            $raw = $response->getBody()->getContents();
             $raw = str_replace('])}while(1);</x>', '', $raw);
             $body = json_decode($raw);
+            if ('No error' !== $jsonError = json_last_error_msg()) {
+                throw new \RuntimeException($jsonError);
+            }
 
             if (null !== $this->cacheProvider) {
                 $this->cacheProvider->save(
@@ -71,18 +135,26 @@ class MediumFeed extends AbstractFeedProvider
                 );
             }
 
-            return $this->getTypedFeed($body);
+            return $body;
         } catch (ClientException $e) {
-            return [
-                'error' => $e->getMessage(),
-            ];
+            throw new FeedProviderErrorException($this->getFeedPlatform(), $e->getMessage(), $e);
         }
     }
+
+    /**
+     * @inheritDoc
+     */
+    protected function getFeed($count = 5): array
+    {
+        return $this->getTypedFeed($this->getRawFeed($count));
+    }
+
 
     /**
      * @param $body
      *
      * @return array
+     * @throws \Exception
      */
     protected function getTypedFeed($body)
     {
@@ -119,7 +191,11 @@ class MediumFeed extends AbstractFeedProvider
     public function getDateTime($item)
     {
         $createdAt = new \DateTime();
-        $createdAt->setTimestamp($item->latestPublishedAt/1000);
+        if ($this->isUsingLatestPublicationDate()) {
+            $createdAt->setTimestamp($item->latestPublishedAt/1000);
+        } else {
+            $createdAt->setTimestamp($item->firstPublishedAt/1000);
+        }
         return $createdAt;
     }
 
@@ -136,31 +212,16 @@ class MediumFeed extends AbstractFeedProvider
     }
 
     /**
-     * {@inheritdoc}
-     */
-    public function isValid($feed)
-    {
-        return null !== $feed && is_array($feed) && !isset($feed['error']);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getErrors($feed)
-    {
-        return $feed['error'];
-    }
-
-    /**
      * @inheritDoc
      */
-    protected function createFeedItemFromObject($item)
+    protected function createFeedItemFromObject($item): FeedItem
     {
         $feedItem = parent::createFeedItemFromObject($item);
         $feedItem->setId($item->uniqueSlug);
         $feedItem->setAuthor($this->name);
         $feedItem->setLink('https://medium.com/'.$this->username.'/'.$item->uniqueSlug);
         $feedItem->setTitle($item->title);
+        $feedItem->setTags($item->virtuals->tags);
         if (isset($item->content) && isset($item->content->subtitle)) {
             $feedItem->setMessage($item->content->subtitle);
         }
@@ -188,5 +249,25 @@ class MediumFeed extends AbstractFeedProvider
     public function getName()
     {
         return $this->name;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isUsingLatestPublicationDate(): bool
+    {
+        return $this->useLatestPublicationDate;
+    }
+
+    /**
+     * @param bool $useLatestPublicationDate
+     *
+     * @return MediumFeed
+     */
+    public function setUseLatestPublicationDate(bool $useLatestPublicationDate): MediumFeed
+    {
+        $this->useLatestPublicationDate = $useLatestPublicationDate;
+
+        return $this;
     }
 }
