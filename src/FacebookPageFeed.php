@@ -41,6 +41,9 @@ class FacebookPageFeed extends AbstractFeedProvider
     protected $pageId;
     protected $accessToken;
     protected $fields;
+
+    protected $apiBaseUrl = 'https://graph.facebook.com/v3.3/';
+
     /**
      * @var \DateTime|null
      */
@@ -54,23 +57,38 @@ class FacebookPageFeed extends AbstractFeedProvider
 
     /**
      *
-     * @param string $pageId
-     * @param string $accessToken Your App Token
+     * @param string             $pageId
+     * @param string             $accessToken Your App Token
      * @param CacheProvider|null $cacheProvider
-     * @param array $fields
+     * @param array              $fields
+     * @param string|null        $apiBaseUrl
+     *
      * @throws CredentialsException
      */
     public function __construct(
         $pageId,
         $accessToken,
         CacheProvider $cacheProvider = null,
-        $fields = []
+        $fields = [],
+        $apiBaseUrl = null
     ) {
         parent::__construct($cacheProvider);
         $this->pageId = $pageId;
         $this->accessToken = $accessToken;
-        $this->fields = ['from', 'link', 'picture', 'full_picture', 'message', 'story', 'type', 'created_time', 'source', 'status_type'];
+        $this->fields = [
+            'from',
+            'picture',
+            'full_picture',
+            'message',
+            'story',
+            'created_time',
+            'status_type',
+            'message_tags',
+            'shares',
+            'permalink_url'
+        ];
         $this->fields = array_unique(array_merge($this->fields, $fields));
+        $this->apiBaseUrl = $apiBaseUrl ?: $this->apiBaseUrl;
 
         if (null === $this->accessToken ||
             false === $this->accessToken ||
@@ -108,7 +126,7 @@ class FacebookPageFeed extends AbstractFeedProvider
         $value = http_build_query($params, null, '&', PHP_QUERY_RFC3986);
         yield new Request(
             'GET',
-            'https://graph.facebook.com/' . $this->pageId . '/posts?'.$value
+            $this->apiBaseUrl . $this->pageId . '/posts?'.$value
         );
     }
 
@@ -208,6 +226,19 @@ class FacebookPageFeed extends AbstractFeedProvider
         if (isset($item->link)) {
             $feedItem->setLink($item->link);
         }
+        if (isset($item->permalink_url)) {
+            $feedItem->setLink($item->permalink_url);
+        }
+
+        if (isset($item->shares)) {
+            $feedItem->setShareCount($item->shares->count);
+        }
+
+        if (isset($item->message_tags)) {
+            $feedItem->setTags(array_map(function ($messageTag) {
+                return $messageTag->name;
+            }, $item->message_tags));
+        }
 
         if (isset($item->full_picture)) {
             $feedItemImage = new Image();
@@ -216,5 +247,25 @@ class FacebookPageFeed extends AbstractFeedProvider
         }
 
         return $feedItem;
+    }
+
+    /**
+     * @return array
+     */
+    public function getFields(): array
+    {
+        return $this->fields;
+    }
+
+    /**
+     * @param array $fields
+     *
+     * @return FacebookPageFeed
+     */
+    public function setFields(array $fields)
+    {
+        $this->fields = array_unique($fields);
+
+        return $this;
     }
 }

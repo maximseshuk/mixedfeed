@@ -46,7 +46,6 @@ abstract class AbstractFeedProvider implements FeedProviderInterface
      * @var CacheProvider|null
      */
     protected $cacheProvider;
-
     /**
      * @var array
      */
@@ -255,13 +254,13 @@ abstract class AbstractFeedProvider implements FeedProviderInterface
         if (count($this->errors) > 0) {
             throw new FeedProviderErrorException($this->getFeedPlatform(), implode(', ', $this->errors));
         }
-        return is_iterable($feed);
+        return null !== $feed && is_iterable($feed->items);
     }
 
     /**
      * Get errors details.
      *
-     * @param $feed
+     * @param mixed $feed
      *
      * @return string
      * @deprecated Catch FeedProviderErrorException for errors details.
