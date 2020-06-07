@@ -235,6 +235,7 @@ abstract class AbstractFeedProvider implements FeedProviderInterface
         $feedItem->setDateTime($this->getDateTime($item));
         $feedItem->setMessage($this->getCanonicalMessage($item));
         $feedItem->setPlatform($this->getFeedPlatform());
+        $feedItem->setRawData($item);
         return $feedItem;
     }
 

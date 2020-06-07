@@ -59,6 +59,11 @@ class FeedItem
      */
     protected $shareCount;
 
+	/**
+	 * @var mixed
+	 */
+	protected $rawData;
+
     /**
      * @return string
      */
@@ -289,4 +294,24 @@ class FeedItem
 
         return $this;
     }
+
+	/**
+	 * @return mixed
+	 */
+	public function getRawData()
+	{
+		return $this->rawData;
+	}
+
+	/**
+	 * @param $rawData
+	 *
+	 * @return $this
+	 */
+	public function setRawData($rawData)
+	{
+		$this->rawData = $rawData;
+
+		return $this;
+	}
 }

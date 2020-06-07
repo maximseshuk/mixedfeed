@@ -7,6 +7,7 @@ use Doctrine\Common\Cache\CacheProvider;
 use GuzzleHttp\Psr7\Request;
 use RZ\MixedFeed\AbstractFeedProvider\AbstractYoutubeVideoFeed;
 use RZ\MixedFeed\Canonical\FeedItem;
+use RZ\MixedFeed\Canonical\Image;
 
 class YoutubeChannelFeed extends AbstractYoutubeVideoFeed
 {
@@ -45,10 +46,11 @@ class YoutubeChannelFeed extends AbstractYoutubeVideoFeed
 	{
 		$value = http_build_query([
 			'order' => 'date',
-			'part' => 'snippet,contentDetails',
+			'part' => 'snippet',
 			'key' => $this->apiKey,
-			'playlistId' => $this->playlistId,
+			'channelId' => $this->channelId,
 			'maxResults' => $count,
+			'type' => 'video',
 		]);
 		yield new Request(
 			'GET',
@@ -80,9 +82,27 @@ class YoutubeChannelFeed extends AbstractYoutubeVideoFeed
 	 */
 	protected function createFeedItemFromObject($item): FeedItem
 	{
-		$feedItem = parent::createFeedItemFromObject($item);
+		$feedItem = AbstractFeedProvider::createFeedItemFromObject($item);
 		$feedItem->setId($item->id->videoId);
 		$feedItem->setLink('https://www.youtube.com/watch?v=' . $item->id->videoId);
+		$feedItem->setTitle($item->snippet->title);
+		$feedItem->setMessage($item->snippet->description);
+		$feedItem->setAuthor($item->snippet->channelTitle);
+
+		if (
+			isset($item->snippet->thumbnails)
+			&& is_object($item->snippet->thumbnails)
+			&& count((array) $item->snippet->thumbnails) > 0
+		) {
+			end($item->snippet->thumbnails);
+			$maxThumbnailKey = key($item->snippet->thumbnails);
+
+			$feedItemImage = new Image();
+			$feedItemImage->setUrl($item->snippet->thumbnails->{$maxThumbnailKey}->url);
+			$feedItemImage->setWidth($item->snippet->thumbnails->{$maxThumbnailKey}->width);
+			$feedItemImage->setHeight($item->snippet->thumbnails->{$maxThumbnailKey}->height);
+			$feedItem->setImages([$feedItemImage]);
+		}
 
 		return $feedItem;
 	}
